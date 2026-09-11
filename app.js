@@ -19,12 +19,13 @@ const STR = {
     "status-error": "تعذر تحميل النموذج",
     "engine-note": "يعمل داخل متصفحك بالكامل — لا يُرفع ملفك إلى أي سيرفر.",
     layers: "الطبقات",
-    "layers-empty": "انقر على أي عنصر في الصورة لاستخراجه كطبقة.",
+    "layers-empty": "انقر على أي عنصر في الصورة لاستخراجه كطبقة — أو اضغط «فصل تلقائي» لتقسيم الصورة كاملة.",
     export: "التصدير",
     "export-zip": "تنزيل كل الطبقات ZIP",
     "export-composite": "تنزيل الصورة المركبة",
     open: "فتح صورة",
     demo: "صورة تجريبية",
+    auto: "فصل تلقائي",
     clear: "مسح الطبقات",
     "dz-title": "اسحب صورتك هنا",
     "dz-sub": "أو اضغط الزر بالأسفل — JPG / PNG / WebP — كل شيء يعمل محلياً",
@@ -35,9 +36,10 @@ const STR = {
     "busy-model": "تحميل نموذج الذكاء الاصطناعي (مرة واحدة فقط)...",
     "busy-embed": "تحليل الصورة...",
     "busy-click": "استخراج العنصر...",
-    "layer-full": "الصورة كاملة",
+    "busy-auto": "فصل تلقائي جارٍ — نقطة",
+    "layer-full": "الخلفية",
     layer: "عنصر",
-    "confirm-clear": "مسح كل الطبقات؟",
+    "confirm-clear": "مسح الطبقات المستخرجة؟ (الخلفية تبقى)",
     "mask-empty": "لم يُعثر على عنصر هنا — جرّب نقطة أخرى",
     transform: "تحكم بالعنصر",
     "tf-scale": "التكبير",
@@ -56,12 +58,13 @@ const STR = {
     "status-error": "Failed to load model",
     "engine-note": "Runs 100% in your browser — your file never leaves your device.",
     layers: "Layers",
-    "layers-empty": "Click any object in the image to extract it as a layer.",
+    "layers-empty": "Click any object in the image to extract it as a layer — or press Auto-split to divide the whole image.",
     export: "Export",
     "export-zip": "Download all layers (ZIP)",
     "export-composite": "Download composite",
     open: "Open image",
     demo: "Sample image",
+    auto: "Auto-split",
     clear: "Clear layers",
     "dz-title": "Drop your image here",
     "dz-sub": "or pick below — JPG / PNG / WebP — everything stays local",
@@ -72,9 +75,10 @@ const STR = {
     "busy-model": "Loading AI model (one time only)...",
     "busy-embed": "Analyzing image...",
     "busy-click": "Extracting element...",
-    "layer-full": "Full image",
+    "busy-auto": "Auto-splitting — point",
+    "layer-full": "Background",
     layer: "Object",
-    "confirm-clear": "Clear all layers?",
+    "confirm-clear": "Clear extracted layers? (background stays)",
     "mask-empty": "No object found there — try another spot",
     transform: "Element control",
     "tf-scale": "Scale",
@@ -114,8 +118,9 @@ const state = {
   rawImage: null,
   imageInputs: null,
   imageEmb: null,
-  layers: [], // {id,name,color,visible,canvas,area, dx,dy,scale,rot,opacity}
+  layers: [], // {id,name,color,visible,canvas,area, dx,dy,scale,rot,opacity, isBackground}
   nextId: 1,
+  objCount: 0, // object counter (background excluded)
   selected: null,
   drag: null, // {mx,my,lx,ly} when dragging
   busy: false,
@@ -145,6 +150,7 @@ function hideBusy() {
 function setButtons() {
   const hasImg = !!state.srcCanvas;
   const hasLayers = state.layers.length > 0;
+  $("btn-auto").disabled = !hasImg || state.busy;
   $("btn-clear").disabled = !hasLayers || state.busy;
   $("btn-zip").disabled = !hasLayers;
   $("btn-composite").disabled = !hasLayers;
@@ -186,6 +192,33 @@ async function ensureModel() {
 }
 
 /* ================= image load ================= */
+function makeBackgroundCanvas() {
+  const c = document.createElement("canvas");
+  c.width = state.srcCanvas.width;
+  c.height = state.srcCanvas.height;
+  c.getContext("2d").putImageData(state.srcImageData, 0, 0);
+  return c;
+}
+
+function resetToBackgroundLayer() {
+  state.layers = [];
+  state.nextId = 1;
+  state.objCount = 0;
+  state.selected = null;
+  state.drag = null;
+  const bg = makeBackgroundCanvas();
+  state.layers.push({
+    id: state.nextId++,
+    name: t("layer-full"),
+    color: "#94a3b8",
+    visible: true,
+    canvas: bg,
+    area: bg.width * bg.height,
+    dx: 0, dy: 0, scale: 1, rot: 0, opacity: 1,
+    isBackground: true,
+  });
+}
+
 async function loadFromSource(src) {
   try {
     await ensureModel();
@@ -213,8 +246,7 @@ async function loadFromSource(src) {
     state.rawImage = new RawImage(pixelData, w, h, 4);
     state.imageInputs = await state.processor(state.rawImage);
     state.imageEmb = null;
-    state.layers = [];
-    state.selected = null;
+    resetToBackgroundLayer();
 
     view.width = w; view.height = h;
     view.classList.add("on");
@@ -306,12 +338,119 @@ function addLayer(canvas, name, area) {
   state.layers.push({
     id: state.nextId++,
     name,
-    color: PALETTE[idx % PALETTE.length],
+    color: PALETTE[(idx - 1 + PALETTE.length) % PALETTE.length],
     visible: true,
     canvas,
     area: area ?? canvas.width * canvas.height,
     dx: 0, dy: 0, scale: 1, rot: 0, opacity: 1,
   });
+}
+
+/* Cut the segmented object out of the background layer and patch the hole
+   by growing surrounding colors inward (grass-fire inpainting) — Canva-style:
+   when the object is moved away, a plausible background shows behind it. */
+function cutFromBackground(seg) {
+  const bg = state.layers.find((L) => L.isBackground);
+  if (!bg) return;
+  const w = seg.w, h = seg.h;
+  const ctx = bg.canvas.getContext("2d");
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const hole = seg.mask;
+
+  // 1) erase hole pixels (alpha → 0)
+  const isHole = new Uint8Array(w * h);
+  let remaining = 0;
+  for (let i = 0, p = 3; i < hole.length; i++, p += 4) {
+    if (hole[i]) { isHole[i] = 1; remaining++; d[p] = 0; }
+  }
+
+  // 2) grass-fire fill: grow border colors inward, wave by wave
+  const filled = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) filled[i] = isHole[i] ? 0 : 1;
+
+  let wave = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!isHole[i]) continue;
+      if (
+        (x > 0 && filled[i - 1]) || (x < w - 1 && filled[i + 1]) ||
+        (y > 0 && filled[i - w]) || (y < h - 1 && filled[i + w])
+      ) wave.push(i);
+    }
+  }
+
+  const NB = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+  let guard = 0;
+  while (wave.length && remaining > 0 && guard++ < 8192) {
+    // compute colors for this wave from current filled pixels
+    const colors = new Array(wave.length);
+    for (let k = 0; k < wave.length; k++) {
+      const i = wave[k];
+      const x = i % w, y = (i / w) | 0;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (const [dx, dy] of NB) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const ni = ny * w + nx;
+        if (!filled[ni]) continue;
+        const p = ni * 4;
+        r += d[p]; g += d[p + 1]; b += d[p + 2]; n++;
+      }
+      colors[k] = n ? [r / n, g / n, b / n] : null;
+    }
+    // apply + mark filled
+    const newlyFilled = [];
+    for (let k = 0; k < wave.length; k++) {
+      const i = wave[k];
+      if (!colors[k]) continue;
+      const p = i * 4;
+      d[p] = colors[k][0]; d[p + 1] = colors[k][1]; d[p + 2] = colors[k][2]; d[p + 3] = 255;
+      filled[i] = 1; remaining--; newlyFilled.push(i);
+    }
+    if (!newlyFilled.length) break;
+    // next wave: unfilled hole pixels adjacent to newly filled
+    const nextSet = new Set();
+    for (const i of newlyFilled) {
+      const x = i % w, y = (i / w) | 0;
+      for (const [dx, dy] of NB) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const ni = ny * w + nx;
+        if (isHole[ni] && !filled[ni]) nextSet.add(ni);
+      }
+    }
+    wave = Array.from(nextSet);
+  }
+
+  ctx.putImageData(img, 0, 0);
+  _alphaCache.delete(bg.canvas);
+}
+
+/* Extract one object at (x,y): SAM → object layer + cut from background */
+async function extractAt(x, y) {
+  try {
+    showBusy("busy-click");
+    await ensureModel();
+    const seg = await segmentAt([[x, y]]);
+    const ratio = seg.area / (view.width * view.height);
+    if (ratio < 0.0005 || ratio > 0.98) {
+      setBusyText(t("mask-empty"));
+      setTimeout(hideBusy, 900);
+      return;
+    }
+    const objCanvas = layerCanvasFromMask(seg);
+    cutFromBackground(seg);
+    state.objCount++;
+    addLayer(objCanvas, `${t("layer")} ${state.objCount}`, seg.area);
+    state.selected = state.layers.length - 1;
+    renderLayers(); renderTransformPanel(); redraw();
+    hideBusy(); setButtons();
+  } catch (e) {
+    console.error(e);
+    hideBusy();
+  }
 }
 
 function renderLayers() {
@@ -334,7 +473,6 @@ function renderLayers() {
     li.querySelector('[data-act="dl"]').onclick = () => downloadCanvas(L.canvas, `layermagic_${i + 1}.png`);
     li.querySelector('[data-act="del"]').onclick = () => {
       state.layers.splice(i, 1);
-      state.layers.forEach((l2, j) => { l2.color = PALETTE[j % PALETTE.length]; });
       if (state.selected === i) state.selected = null;
       else if (state.selected !== null && state.selected > i) state.selected--;
       renderLayers(); renderTransformPanel(); redraw(); setButtons();
@@ -466,10 +604,10 @@ function moveLayer(dir) {
   const i = state.selected;
   const j = i + dir;
   if (j < 0 || j >= state.layers.length) return;
+  if (state.layers[i].isBackground || state.layers[j].isBackground) return; // background stays at bottom
   const tmp = state.layers[i];
   state.layers[i] = state.layers[j];
   state.layers[j] = tmp;
-  state.layers.forEach((l2, k) => { l2.color = PALETTE[k % PALETTE.length]; });
   state.selected = j;
   renderLayers();
   renderTransformPanel();
@@ -498,6 +636,7 @@ function getAlphaMask(L) {
 function hitTest(x, y) {
   for (let i = state.layers.length - 1; i >= 0; i--) {
     const L = state.layers[i];
+    if (L.isBackground) continue; // background never blocks extraction
     if (!L.visible || L.opacity < 0.05) continue;
     const cx = L.dx + L.canvas.width / 2;
     const cy = L.dy + L.canvas.height / 2;
@@ -534,30 +673,12 @@ view.addEventListener("mousedown", async (ev) => {
     renderTransformPanel();
     redraw();
   } else {
-    // EXTRACT new layer with SAM
+    // EXTRACT new object (SAM) — unified Canva-style flow
     state.selected = null;
     renderLayers();
     renderTransformPanel();
     redraw();
-    try {
-      showBusy("busy-click");
-      await ensureModel();
-      const seg = await segmentAt([[x, y]]);
-      const ratio = seg.area / (view.width * view.height);
-      if (ratio < 0.0005 || ratio > 0.98) {
-        setBusyText(t("mask-empty"));
-        setTimeout(hideBusy, 900);
-        return;
-      }
-      addLayer(layerCanvasFromMask(seg), `${t("layer")} ${state.layers.length}`, seg.area);
-      // auto-select the new layer so the user can immediately drag/scale it
-      state.selected = state.layers.length - 1;
-      renderLayers(); renderTransformPanel(); redraw();
-      hideBusy(); setButtons();
-    } catch (e) {
-      console.error(e);
-      hideBusy();
-    }
+    await extractAt(x, y);
   }
 });
 
@@ -599,24 +720,7 @@ view.addEventListener("touchstart", async (ev) => {
     renderLayers();
     renderTransformPanel();
     redraw();
-    try {
-      showBusy("busy-click");
-      await ensureModel();
-      const seg = await segmentAt([[x, y]]);
-      const ratio = seg.area / (view.width * view.height);
-      if (ratio < 0.0005 || ratio > 0.98) {
-        setBusyText(t("mask-empty"));
-        setTimeout(hideBusy, 900);
-        return;
-      }
-      addLayer(layerCanvasFromMask(seg), `${t("layer")} ${state.layers.length}`, seg.area);
-      state.selected = state.layers.length - 1;
-      renderLayers(); renderTransformPanel(); redraw();
-      hideBusy(); setButtons();
-    } catch (e) {
-      console.error(e);
-      hideBusy();
-    }
+    await extractAt(x, y);
   }
 }, { passive: false });
 
@@ -699,6 +803,92 @@ $("btn-composite").addEventListener("click", () => {
   downloadCanvas(comp, "layermagic_composite.png");
 });
 
+/* ================= auto split (Canva-style one click) ================= */
+function coarseBits(seg, G = 64) {
+  const bits = new Uint8Array(G * G);
+  const gw = Math.ceil(seg.w / G), gh = Math.ceil(seg.h / G);
+  for (let gy = 0; gy < G; gy++) {
+    for (let gx = 0; gx < G; gx++) {
+      const x0 = gx * gw, y0 = gy * gh;
+      let hit = 0;
+      for (let y = y0; y < Math.min(y0 + gh, seg.h) && !hit; y += Math.max(1, gh >> 2)) {
+        for (let x = x0; x < Math.min(x0 + gw, seg.w); x += Math.max(1, gw >> 2)) {
+          if (seg.mask[y * seg.w + x]) { hit = 1; break; }
+        }
+      }
+      bits[gy * G + gx] = hit;
+    }
+  }
+  return bits;
+}
+function iouBits(a, b) {
+  let inter = 0, uni = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] & b[i]) inter++;
+    if (a[i] | b[i]) uni++;
+  }
+  return uni ? inter / uni : 0;
+}
+
+async function autoSplit() {
+  if (!state.srcCanvas || state.busy) return;
+  try {
+    showBusy("busy-auto");
+    await ensureModel();
+    const W = view.width, H = view.height;
+    const total = W * H;
+
+    let step = Math.max(64, Math.round(Math.min(W, H) / 8));
+    const buildPts = () => {
+      const arr = [];
+      for (let y = Math.round(step / 2); y < H; y += step)
+        for (let x = Math.round(step / 2); x < W; x += step) arr.push([x, y]);
+      return arr;
+    };
+    let pts = buildPts();
+
+    const accepted = [];
+    const t0 = performance.now();
+    for (let pi = 0; pi < pts.length; pi++) {
+      const [x, y] = pts[pi];
+      const seg = await segmentAt([[x, y]]);
+      if (pi % 3 === 0) {
+        setBusyText(`${t("busy-auto")} ${pi + 1}/${pts.length}`);
+        await new Promise((r) => setTimeout(r, 0));
+        const el = performance.now() - t0;
+        if (el / (pi + 1) > 400 && step < 220) {
+          step = Math.round(step * 1.6);
+          pts = buildPts();
+        }
+      }
+      const ratio = seg.area / total;
+      if (ratio < 0.004 || ratio > 0.9) continue;
+      const bits = coarseBits(seg);
+      let dup = false;
+      for (const a of accepted) if (iouBits(a.bits, bits) > 0.8) { dup = true; break; }
+      if (dup) continue;
+      accepted.push({ seg, bits });
+      if (accepted.length >= 12) break;
+    }
+
+    // big objects first → small ones end up on top (correct visual stacking)
+    accepted.sort((a, b) => b.seg.area - a.seg.area);
+    for (const a of accepted) {
+      cutFromBackground(a.seg);
+      state.objCount++;
+      addLayer(layerCanvasFromMask(a.seg), `${t("layer")} ${state.objCount}`, a.seg.area);
+    }
+    state.selected = accepted.length ? state.layers.length - 1 : null;
+    renderLayers(); renderTransformPanel(); redraw();
+    hideBusy(); setButtons();
+  } catch (e) {
+    console.error(e);
+    hideBusy();
+  }
+}
+
+$("btn-auto").addEventListener("click", autoSplit);
+
 /* ================= toolbar wiring ================= */
 const openFile = () => $("file-input").click();
 $("btn-open").addEventListener("click", openFile);
@@ -716,7 +906,11 @@ $("btn-demo-2").addEventListener("click", openDemo);
 $("btn-clear").addEventListener("click", () => {
   if (!state.layers.length) return;
   if (!confirm(t("confirm-clear"))) return;
-  state.layers = [];
+  // keep (or recreate) the background layer, drop all extracted objects
+  const hadBg = state.layers.some((L) => L.isBackground);
+  state.layers = hadBg ? state.layers.filter((L) => L.isBackground) : [];
+  if (!state.layers.length) resetToBackgroundLayer();
+  state.objCount = 0;
   state.selected = null;
   renderLayers(); renderTransformPanel(); redraw(); setButtons();
 });
