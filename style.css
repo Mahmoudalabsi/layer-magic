@@ -161,11 +161,9 @@ body {
   overflow: hidden;
   display: flex; align-items: center; justify-content: center;
 }
-#view { max-width: calc(100% - 24px); max-height: calc(100% - 24px); display: none; }
+#view { max-width: calc(100% - 24px); max-height: calc(100% - 24px); display: none; cursor: pointer; }
 #view.on { display: block; }
-#view.click-mode { cursor: crosshair; }
-#view.edit-mode { cursor: grab; }
-#view.edit-mode.dragging { cursor: grabbing; }
+#view.dragging { cursor: grabbing; }
 
 /* transform panel */
 .tf-row {

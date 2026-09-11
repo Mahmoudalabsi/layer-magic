@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=1" />
+  <link rel="stylesheet" href="style.css?v=2" />
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body>
@@ -52,7 +52,7 @@
           <span class="badge" id="layers-count">0</span>
         </div>
         <ul id="layers-list" class="layers-list"></ul>
-        <div id="layers-empty" class="muted small" data-i18n="layers-empty">لا طبقات بعد — حمّل صورة ثم اضغط «فصل تلقائي» أو انقر على أي عنصر.</div>
+        <div id="layers-empty" class="muted small" data-i18n="layers-empty">انقر على أي عنصر في الصورة لاستخراجه كطبقة.</div>
       </section>
 
       <section class="card hidden" id="transform-card">
@@ -95,14 +95,9 @@
 
     <section id="stage">
       <div id="toolbar">
-        <button id="btn-open" class="btn" data-i18n="open">فتح صورة</button>
+        <button id="btn-open" class="btn primary" data-i18n="open">فتح صورة</button>
         <button id="btn-demo" class="btn" data-i18n="demo">صورة تجريبية</button>
         <span class="sep"></span>
-        <button id="btn-auto" class="btn primary" disabled data-i18n="auto">فصل تلقائي</button>
-        <button id="btn-click" class="btn toggle" disabled data-i18n="click-mode">وضع النقر</button>
-        <button id="btn-edit" class="btn toggle" disabled data-i18n="edit-mode">تحرير العناصر</button>
-        <span class="sep"></span>
-        <button id="btn-parallax" class="btn toggle" disabled data-i18n="parallax">بارالاكس</button>
         <button id="btn-clear" class="btn danger" disabled data-i18n="clear">مسح الطبقات</button>
       </div>
 
@@ -129,15 +124,14 @@
       </div>
 
       <div id="hintbar">
-        <span data-i18n="hint-auto">«فصل تلقائي»: يقسم الصورة كاملة إلى طبقات كائنات تلقائياً</span>
-        <span data-i18n="hint-click">«وضع النقر»: انقر أي عنصر لاستخراجه كطبقة مستقلة</span>
-        <span data-i18n="hint-edit">«تحرير العناصر»: اسحب/كبّر/أدر الطبقات بالفأرة — عجلة الفأرة للتكبير</span>
+        <span data-i18n="hint-1">💡 انقر على أي عنصر في الصورة لاستخراجه كطبقة</span>
+        <span data-i18n="hint-2">💡 اسحب الطبقات لتحريكها — عجلة الفأرة للتكبير</span>
       </div>
     </section>
   </main>
 
   <input type="file" id="file-input" accept="image/*" hidden />
 
-  <script type="module" src="app.js?v=1"></script>
+  <script type="module" src="app.js?v=2"></script>
 </body>
 </html>
