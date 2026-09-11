@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f4f6f3" />
+  <meta name="description" content="LayerMagic — فصل الصور إلى طبقات بالذكاء الاصطناعي داخل المتصفح. Split images into AI layers, fully in your browser." />
+  <title>LayerMagic — فصل الصور إلى طبقات</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=1" />
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+        <path fill="#10b981" d="M12 2 2 7.5 12 13l10-5.5L12 2z"/>
+        <path fill="#34d399" d="m2 12.5 10 5.5 10-5.5-2.2-1.2L12 16 4.2 11.3 2 12.5z"/>
+        <path fill="#a7f3d0" d="m2 17.5 10 5.5 10-5.5-2.2-1.2L12 21l-7.8-4.7L2 17.5z"/>
+      </svg>
+      <div class="brand-text">
+        <strong>LayerMagic</strong>
+        <span data-i18n="tagline">فصل الصور إلى طبقات بالذكاء الاصطناعي</span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="btn-lang" class="chip-btn" title="Language">EN</button>
+      <a class="chip-btn" href="https://github.com/Mahmoudalabsi/layer-magic" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <main id="layout">
+    <aside id="panel">
+      <section class="card" id="status-card">
+        <div class="card-title" data-i18n="engine">المحرك</div>
+        <div id="engine-status" class="engine-status">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text" data-i18n="status-idle">النموذج غير محمّل بعد</span>
+        </div>
+        <div id="progress-wrap" class="progress-wrap hidden">
+          <div class="progress-label" id="progress-label">...</div>
+          <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+        <div class="muted small" id="engine-note" data-i18n="engine-note">يعمل داخل متصفحك بالكامل — لا يُرفع ملفك إلى أي سيرفر.</div>
+      </section>
+
+      <section class="card grow" id="layers-card">
+        <div class="card-title">
+          <span data-i18n="layers">الطبقات</span>
+          <span class="badge" id="layers-count">0</span>
+        </div>
+        <ul id="layers-list" class="layers-list"></ul>
+        <div id="layers-empty" class="muted small" data-i18n="layers-empty">لا طبقات بعد — حمّل صورة ثم اضغط «فصل تلقائي» أو انقر على أي عنصر.</div>
+      </section>
+
+      <section class="card hidden" id="transform-card">
+        <div class="card-title">
+          <span data-i18n="transform">تحكم بالعنصر</span>
+          <span class="badge" id="transform-idx">—</span>
+        </div>
+        <div id="transform-body">
+          <div class="tf-row">
+            <label data-i18n="tf-scale">التكبير</label>
+            <input type="range" id="tf-scale" min="0.1" max="3" step="0.05" value="1" />
+            <span class="tf-val" id="tf-scale-val">1.00×</span>
+          </div>
+          <div class="tf-row">
+            <label data-i18n="tf-rot">التدوير</label>
+            <input type="range" id="tf-rot" min="-180" max="180" step="1" value="0" />
+            <span class="tf-val" id="tf-rot-val">0°</span>
+          </div>
+          <div class="tf-row">
+            <label data-i18n="tf-opacity">الشفافية</label>
+            <input type="range" id="tf-opacity" min="0" max="1" step="0.05" value="1" />
+            <span class="tf-val" id="tf-opacity-val">100%</span>
+          </div>
+          <div class="tf-actions">
+            <button class="btn small" id="tf-up" data-i18n="tf-up">للأمام</button>
+            <button class="btn small" id="tf-down" data-i18n="tf-down">للخلف</button>
+            <button class="btn small" id="tf-reset" data-i18n="tf-reset">إعادة</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="export-card">
+        <div class="card-title" data-i18n="export">التصدير</div>
+        <div class="btn-col">
+          <button id="btn-zip" class="btn primary" disabled data-i18n="export-zip">تنزيل كل الطبقات ZIP</button>
+          <button id="btn-composite" class="btn" disabled data-i18n="export-composite">تنزيل الصورة المركبة</button>
+        </div>
+      </section>
+    </aside>
+
+    <section id="stage">
+      <div id="toolbar">
+        <button id="btn-open" class="btn" data-i18n="open">فتح صورة</button>
+        <button id="btn-demo" class="btn" data-i18n="demo">صورة تجريبية</button>
+        <span class="sep"></span>
+        <button id="btn-auto" class="btn primary" disabled data-i18n="auto">فصل تلقائي</button>
+        <button id="btn-click" class="btn toggle" disabled data-i18n="click-mode">وضع النقر</button>
+        <button id="btn-edit" class="btn toggle" disabled data-i18n="edit-mode">تحرير العناصر</button>
+        <span class="sep"></span>
+        <button id="btn-parallax" class="btn toggle" disabled data-i18n="parallax">بارالاكس</button>
+        <button id="btn-clear" class="btn danger" disabled data-i18n="clear">مسح الطبقات</button>
+      </div>
+
+      <div id="canvas-wrap">
+        <canvas id="view"></canvas>
+        <div id="dropzone">
+          <div class="dz-inner">
+            <svg viewBox="0 0 24 24" width="54" height="54" aria-hidden="true">
+              <path fill="#10b981" d="M12 2 2 7.5 12 13l10-5.5L12 2z"/>
+              <path fill="#6ee7b7" d="m2 12.5 10 5.5 10-5.5-2.2-1.2L12 16 4.2 11.3 2 12.5z"/>
+            </svg>
+            <h2 data-i18n="dz-title">اسحب صورتك هنا</h2>
+            <p class="muted" data-i18n="dz-sub">أو اضغط الزر بالأسفل — JPG / PNG / WebP — كل شيء يعمل محلياً</p>
+            <div class="dz-actions">
+              <button id="btn-open-2" class="btn primary" data-i18n="choose-image">اختر صورة</button>
+              <button id="btn-demo-2" class="btn" data-i18n="try-sample">جرّب الصورة التجريبية</button>
+            </div>
+          </div>
+        </div>
+        <div id="busy" class="hidden">
+          <div class="spinner"></div>
+          <div id="busy-text">...</div>
+        </div>
+      </div>
+
+      <div id="hintbar">
+        <span data-i18n="hint-auto">«فصل تلقائي»: يقسم الصورة كاملة إلى طبقات كائنات تلقائياً</span>
+        <span data-i18n="hint-click">«وضع النقر»: انقر أي عنصر لاستخراجه كطبقة مستقلة</span>
+        <span data-i18n="hint-edit">«تحرير العناصر»: اسحب/كبّر/أدر الطبقات بالفأرة — عجلة الفأرة للتكبير</span>
+      </div>
+    </section>
+  </main>
+
+  <input type="file" id="file-input" accept="image/*" hidden />
+
+  <script type="module" src="app.js?v=1"></script>
+</body>
+</html>
