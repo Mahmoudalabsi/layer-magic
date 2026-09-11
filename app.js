@@ -255,8 +255,8 @@ async function loadFromSource(src, name) {
     view.classList.add("on");
     $("dropzone").classList.add("hidden");
     redraw();
-    setButtons();
     hideBusy();
+    setButtons();
   } catch (e) {
     console.error(e);
     hideBusy();
@@ -757,8 +757,8 @@ async function autoSplit() {
 
     renderLayers();
     redraw();
-    setButtons();
     hideBusy();
+    setButtons();
   } catch (e) {
     console.error(e);
     hideBusy();
@@ -783,8 +783,7 @@ view.addEventListener("click", async (ev) => {
       return;
     }
     addLayer(layerCanvasFromMask(seg), `${t("layer")} ${state.layers.length}`, seg.area);
-    renderLayers(); redraw(); setButtons();
-    hideBusy();
+    renderLayers(); redraw(); hideBusy(); setButtons();
   } catch (e) {
     console.error(e);
     hideBusy();
