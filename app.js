@@ -286,8 +286,10 @@ async function segmentAt(points) {
   const [oh, ow] = state.imageInputs.original_sizes[0];
   const [rh, rw] = state.imageInputs.reshaped_input_sizes[0];
   const scaled = points.map(([x, y]) => [(x * rw) / ow, (y * rh) / oh]);
-  const input_points = new Tensor("float32", Float32Array.from(scaled.flat()), [1, points.length, 2]);
-  const input_labels = new Tensor("int64", BigInt64Array.from(points.map(() => 1n)), [1, points.length]);
+  // SAM expects rank-4 input_points: [batch, point_batch, points_per_batch, 2]
+  const input_points = new Tensor("float32", Float32Array.from(scaled.flat()), [1, 1, points.length, 2]);
+  // and rank-3 input_labels: [batch, point_batch, points_per_batch]
+  const input_labels = new Tensor("int64", BigInt64Array.from(points.map(() => 1n)), [1, 1, points.length]);
 
   const outputs = await state.model({
     ...state.imageInputs,
